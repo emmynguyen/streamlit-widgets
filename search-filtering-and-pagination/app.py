@@ -8,8 +8,8 @@ from pandas.api.types import (
 )
 from snowflake.snowpark import Session
 
-@st.cache_data
-def load_data(database: str, schema: str, object: str):
+@st.cache_resource
+def initialize_session():
     connection_parameters = {
         "account": st.secrets["snowflake"]["account"],
         "user": st.secrets["snowflake"]["user"],
@@ -20,13 +20,18 @@ def load_data(database: str, schema: str, object: str):
         "schema": st.secrets["snowflake"]["schema"] # optional
     }
     session = Session.builder.configs(connection_parameters).create()
+    return session
+
+@st.cache_data
+def load_data(database: str, schema: str, object: str):
+    session = initialize_session()
     return session.table(f'{database}.{schema}.{object}').to_pandas()
 
 def split_frame(input_df, rows):
     df = [input_df.loc[i : i + rows - 1, :] for i in range(0, len(input_df), rows)]
     return df
 
-def paginate_df(name: str, dataset):
+def paginate_df(name: str, dataset, streamlit_object: str, disabled=None, num_rows=None):
     top_menu = st.columns(3)
     with top_menu[0]:
         sort = st.radio("Sort Data", options=["Yes", "No"], horizontal=1, index=1)
@@ -56,7 +61,12 @@ def paginate_df(name: str, dataset):
         st.markdown(f"Page **{current_page}** of **{total_pages}** ")
 
     pages = split_frame(dataset, batch_size)
-    pagination.dataframe(data=pages[current_page - 1], use_container_width=True)
+
+    if streamlit_object == 'df':
+        pagination.dataframe(data=pages[current_page - 1], hide_index=True, use_container_width=True)
+    
+    if streamlit_object == 'editable df':
+        pagination.data_editor(data=pages[current_page - 1], hide_index=True, disabled=disabled, num_rows=num_rows, use_container_width=True)
 
 def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -75,7 +85,6 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    # Try to convert datetimes into a standard format (datetime, no timezone)
     for col in df.columns:
         if is_object_dtype(df[col]):
             try:
@@ -136,6 +145,7 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def main():
     df = load_data(st.secrets["snowflake"]["database"], st.secrets["snowflake"]["schema"], st.secrets["snowflake"]["table"])
     dataset = filter_dataframe(df)
-    paginate_df('Customer', dataset)
+    paginate_df('Customer', dataset, 'df')
+    # paginate_df('Customer', dataset, 'editable df', disabled=False, num_rows='dynamic')
 
 main()
